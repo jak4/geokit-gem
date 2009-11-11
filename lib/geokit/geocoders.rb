@@ -5,6 +5,24 @@ require 'yaml'
 require 'timeout'
 require 'logger'
 
+# well, blank? is a very convenient function
+# this is a copy from rails 2.3.4 (activesupport
+class Object
+  # An object is blank if it's false, empty, or a whitespace string.
+  # For example, "", "   ", +nil+, [], and {} are blank.
+  #
+  # This simplifies
+  #
+  #   if !address.nil? && !address.empty?
+  #
+  # to
+  #
+  #   if !address.blank?
+  def blank?
+    respond_to?(:empty?) ? empty? : !self
+  end
+end
+
 module Geokit
 
   class TooManyQueriesError < StandardError; end
@@ -74,6 +92,7 @@ module Geokit
     @@request_timeout = nil    
     @@yahoo = 'REPLACE_WITH_YOUR_YAHOO_KEY'
     @@google = 'REPLACE_WITH_YOUR_GOOGLE_KEY'
+    @@plugins = 'REPLACE WITH ARRAY[ACTIVE_RECORD_MODEL, GEOLOCATION_LOOKUP_METHOD, GEOLOCATION_SAVE_METHOD]'
     @@geocoder_us = false
     @@geocoder_ca = false
     @@geonames = false
@@ -95,6 +114,7 @@ module Geokit
                 @@#{sym}
               end
               if value.is_a?(Hash)
+                # what is this good for? With that you can't pass Hashes as paramter
                 value = (self.domain.nil? ? nil : value[self.domain]) || value.values.first
               end
               value
@@ -123,10 +143,10 @@ module Geokit
       # Main method which calls the do_geocode template method which subclasses
       # are responsible for implementing.  Returns a populated GeoLoc or an
       # empty one with a failed success code.
-      def self.geocode(address, options = {}) 
+      def self.geocode(address, options = {})
         res = do_geocode(address, options)
         return res.nil? ? GeoLoc.new : res
-      end  
+      end
       # Main method which calls the do_reverse_geocode template method which subclasses
       # are responsible for implementing.  Returns a populated GeoLoc or an
       # empty one with a failed success code.
@@ -380,6 +400,125 @@ module Geokit
           logger.error "Caught an error during Geonames geocoding call: "+$!
       end
     end
+    
+    # PluginGeocoder
+    # Used to provide external Geocoders which aren't supposed to be within the GeoKit-Gem itself.
+    # For example we don't want to introduce dependencies to ActiveRecord for this gem. Therefore we can use the PluginGeocoder to work around this dependency.
+    class PluginGeocoder < Geocoder
+      CONFIG_ACCESSORS = {:name => :plugin_name, :model => :model, :find => :find, :save => :save}
+      
+      # normally save_geocode_res would be part of the Geocoder interface defintion above.
+      # However, currently I don't see any geocoder who would need this interface-definition. And those geocoders who need it, can be implemented as a plugin.
+      def self.save_geocode_res(res, provider, provider_order)
+        # if something goes wrong during saving, catch that and let operations continue as if nothing happend
+        begin 
+          plugin = nil
+          
+          # find first provider which has in it's plugin-defintion a save-method defined
+          provider_order.each do |pro|
+            # we went through all provider and are now at the provider which provided a result. So no saving necessary.
+            break if provider.eql?(pro)
+
+            Geokit::Geocoders::plugins.each do |plugn|
+              # we are looking for the plugin that was provided in the provider_order
+              next if !plugn[CONFIG_ACCESSORS[:name]].eql?(pro)
+              # if no save method was defined this plugin is not usable
+              break if plugn[CONFIG_ACCESSORS[:save]].blank?
+              
+              # we found a plugin that fits
+              plugin = plugn
+              break
+            end
+            
+            # we found a plugin that fits
+            break if plugin
+          end
+
+          if check_all(plugin)
+            # send save_method to provided model
+            klass =  Geokit::Geocoders.const_get("#{Geokit::Inflector::camelize(plugin[CONFIG_ACCESSORS[:model]].to_s)}")
+            # only save if find doesn't find this object
+            klass.send(plugin[CONFIG_ACCESSORS[:save]], res) unless klass.send(plugin[CONFIG_ACCESSORS[:find]], res)
+          end
+        rescue Exception => e
+          logger.error e.to_s
+        end
+        
+        return res
+      end
+      
+      private 
+        def self.do_geocode(address, options = {})
+          logger.info "PluginGeocoder can't work without hash_key: ':plugin_provider'" and return nil unless options.has_key?(:plugin_provider)
+          logger.info "Got empty provider. Nothing I can do" and return nil if options[:plugin_provider].blank?
+          
+          provider = options[:plugin_provider]
+          plugin = nil
+          
+          logger.error "Geokit::Geocoders::plugins is empty. Since I'm here you asked me to be called, but without proper configuration I can't do anything. Sorry." if Geokit::Geocoders::plugins.blank?
+          
+          Geokit::Geocoders::plugins.each do |p|
+            if( !p.blank? and p[CONFIG_ACCESSORS[:name]].eql?(provider))
+              plugin = p
+              break
+            end
+          end
+          
+          logger.error "Provider #{provider} not found in Geokit::Geocoders::plugins. Is your configuration correct? The provider-order and plugins configuration have to be in sync." if plugin.blank?
+          
+          if check_find(plugin)
+            # send find_method to provided model
+            return Geokit::Geocoders.const_get("#{Geokit::Inflector::camelize(plugin[CONFIG_ACCESSORS[:model]].to_s)}").send(plugin[CONFIG_ACCESSORS[:find]], address)
+          end
+          
+          return nil        
+        end
+       
+        def self.check_config(plugin)
+          logger.info  "Provided configuration hash was empty!" and return false if(plugin.blank?)
+          logger.info  "Provided configuration not a hash" and return false unless(plugin.is_a?(Hash))
+          logger.info  "Provided class was empty!" and return false if(plugin[CONFIG_ACCESSORS[:model]].blank?)
+          logger.info  "Provided find method was empty!" and return false if(plugin[CONFIG_ACCESSORS[:find]].blank?)
+          return true
+        end
+        
+        def self.check_class(plugin)
+          begin
+            Geokit::Geocoders.const_get "#{Geokit::Inflector::camelize(plugin[CONFIG_ACCESSORS[:model]].to_s)}"
+          rescue
+            logger.info "Provided class #{Geokit::Inflector::camelize(plugin[CONFIG_ACCESSORS[:model]].to_s)} couldn't be found" and return false
+          end
+          return true
+        end
+        
+        def self.check_find(plugin)
+          if check_config(plugin) and check_class(plugin)
+             # get the provided ActiveRecord-Class
+            klass = Geokit::Geocoders.const_get "#{Geokit::Inflector::camelize(plugin[CONFIG_ACCESSORS[:model]].to_s)}"
+            logger.error "Provided class #{plugin[CONFIG_ACCESSORS[:model]].to_s} didn't respond to supplied find method #{plugin[CONFIG_ACCESSORS[:find]].to_s}!" and return false unless klass.respond_to?(plugin[CONFIG_ACCESSORS[:find]])
+            return true
+          end
+          
+          return false
+        end
+      
+        def self.check_save(plugin)
+          if check_config(plugin) and check_class(plugin)
+            logger.error "Provided save method for plugin #{plugin[CONFIG_ACCESSORS[:plugin]]} was empty!" and return false if(plugin[CONFIG_ACCESSORS[:save]].blank?)
+             # get the provided ActiveRecord-Class
+            klass = Geokit::Geocoders.const_get "#{Geokit::Inflector::camelize(plugin[CONFIG_ACCESSORS[:model]].to_s)}"
+            logger.error "Provided class #{plugin[CONFIG_ACCESSORS[:model]].to_s} didn't respond to supplied find method #{plugin[CONFIG_ACCESSORS[:save]].to_s}!" and return false unless klass.respond_to?(plugin[CONFIG_ACCESSORS[:save]])
+            return true
+          end
+          
+          return false
+        end
+      
+        def self.check_all(plugin)
+          return true if check_find(plugin) and check_save(plugin)
+          return false
+        end
+    end
 
     # -------------------------------------------------------------------------------------------
     # Address geocoders that also provide reverse geocoding
@@ -487,7 +626,7 @@ module Geokit
         coordinates=doc.elements['.//coordinates'].text.to_s.split(',')
 
         #basics
-        res.lat=coordinates[1]
+        res.  lat=coordinates[1]
         res.lng=coordinates[0]
         res.country_code=doc.elements['.//CountryNameCode'].text if doc.elements['.//CountryNameCode']
         res.provider='google'
@@ -565,17 +704,17 @@ module Geokit
       #   The bogon list: http://www.cymru.com/Documents/bogon-list.html
 
       NON_ROUTABLE_IP_RANGES = [
-	IPAddr.new('0.0.0.0/8'),      # "This" Network
-	IPAddr.new('10.0.0.0/8'),     # Private-Use Networks
-	IPAddr.new('14.0.0.0/8'),     # Public-Data Networks
-	IPAddr.new('127.0.0.0/8'),    # Loopback
-	IPAddr.new('169.254.0.0/16'), # Link local
-	IPAddr.new('172.16.0.0/12'),  # Private-Use Networks
-	IPAddr.new('192.0.2.0/24'),   # Test-Net
-	IPAddr.new('192.168.0.0/16'), # Private-Use Networks
-	IPAddr.new('198.18.0.0/15'),  # Network Interconnect Device Benchmark Testing
-	IPAddr.new('224.0.0.0/4'),    # Multicast
-	IPAddr.new('240.0.0.0/4')     # Reserved for future use
+      	IPAddr.new('0.0.0.0/8'),      # "This" Network
+      	IPAddr.new('10.0.0.0/8'),     # Private-Use Networks
+      	IPAddr.new('14.0.0.0/8'),     # Public-Data Networks
+      	IPAddr.new('127.0.0.0/8'),    # Loopback
+      	IPAddr.new('169.254.0.0/16'), # Link local
+      	IPAddr.new('172.16.0.0/12'),  # Private-Use Networks
+      	IPAddr.new('192.0.2.0/24'),   # Test-Net
+      	IPAddr.new('192.168.0.0/16'), # Private-Use Networks
+      	IPAddr.new('198.18.0.0/15'),  # Network Interconnect Device Benchmark Testing
+      	IPAddr.new('224.0.0.0/4'),    # Multicast
+      	IPAddr.new('240.0.0.0/4')     # Reserved for future use
       ].freeze
 
       private 
@@ -621,7 +760,7 @@ module Geokit
       # the geocoding service. Such queries can occur frequently during
       # integration tests.
       def self.private_ip_address?(ip)
-	return NON_ROUTABLE_IP_RANGES.any? { |range| range.include?(ip) }
+        return NON_ROUTABLE_IP_RANGES.any? { |range| range.include?(ip) }
       end
     end
     
@@ -648,14 +787,28 @@ module Geokit
       # The failover approach is crucial for production-grade apps, but is rarely used.
       # 98% of your geocoding calls will be successful with the first call  
       def self.do_geocode(address, options = {})
-        geocode_ip = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.match(address)
+        # if one geocoder can deal with a geoloc object, why can't the multigeocoder?
+        geocode_ip = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.match((address.is_a?(GeoLoc) ? address.to_geocodeable_s : address))
         provider_order = geocode_ip ? Geokit::Geocoders::ip_provider_order : Geokit::Geocoders::provider_order
         
         provider_order.each do |provider|
           begin
-            klass = Geokit::Geocoders.const_get "#{Geokit::Inflector::camelize(provider.to_s)}Geocoder"
-            res = klass.send :geocode, address, options
-            return res if res.success?
+            # try normal classes first
+            klass = Geokit::Geocoders.const_get "#{Geokit::Inflector::camelize(provider.to_s)}Geocoder" rescue nil
+            res = GeoLoc.new
+            
+            if klass
+               res = klass.send :geocode, address, options
+            else
+              # try plugins
+              res = PluginGeocoder.geocode(address, options.merge({:plugin_provider => provider}))
+            end
+           
+            if res.success?
+               # try to save geocoded address (might not happen)
+              PluginGeocoder.save_geocode_res(res, provider, provider_order)
+              return res 
+            end
           rescue
             logger.error("Something has gone very wrong during geocoding, OR you have configured an invalid class name in Geokit::Geocoders::provider_order. Address: #{address}. Provider: #{provider}")
           end

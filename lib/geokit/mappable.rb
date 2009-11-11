@@ -366,6 +366,8 @@ module Geokit
       @success=false
       @precision='unknown'
       @full_address=nil
+      # don't see a reason why provider should not be set here
+     # @provider=h[:provider]
       super(h[:lat],h[:lng])
     end
 
@@ -388,12 +390,28 @@ module Geokit
     # Extracts the street number from the street address if the street address
     # has a value.
     def street_number
-      street_address[/(\d*)/] if street_address
+      # this should be equvivalent to the regexp before but a little bit more powerful
+      street_address[/((\s|^)\d+[\w|\d|$]*?(\s|$))/].strip if street_address
+      # only works if the number is first
+      #street_address[/(\d*)/] if street_address
     end
 
     # Returns the street name portion of the street address.
     def street_name
-       street_address[street_number.length, street_address.length].strip if street_address
+      # this works only if the address starts with the street number
+      #street_address[street_number.length, street_address.length].strip if street_address
+      name = street_address
+      if name
+        number = street_number
+        start_pos = street_address.index(number)
+        if( start_pos > 0 )
+          name = name[0, start_pos] + name[start_pos+number.size, name.size]
+        else
+          name = name[number.size, name.size]
+        end
+        name.gsub!(/\s+/, ' ').strip!
+      end
+      return name
     end
 
     # gives you all the important fields as key-value pairs
