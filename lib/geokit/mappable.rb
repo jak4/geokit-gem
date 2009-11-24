@@ -391,7 +391,7 @@ module Geokit
     # has a value.
     def street_number
       # this should be equvivalent to the regexp before but a little bit more powerful
-      street_address[/((\s|^)\d+[\w|\d|$]*?(\s|$))/].strip if street_address
+      street_address[/((\s|^)\d+[\w|\d|$]*?(\s|$))/].to_s.strip if street_address
       # only works if the number is first
       #street_address[/(\d*)/] if street_address
     end
@@ -409,7 +409,7 @@ module Geokit
         else
           name = name[number.size, name.size]
         end
-        name.gsub!(/\s+/, ' ').strip!
+        name.gsub!(/\s+/, ' ').to_s.strip!
       end
       return name
     end
