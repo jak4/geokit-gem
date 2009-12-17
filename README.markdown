@@ -24,9 +24,12 @@ To setup the a PluginGeocoder you have todo 2 (3) things:
     
   :model => ModelName: This is your model you have coded some geocoding functionality into. Your model can, for example try to lookup cashed geocoding locations.
   
+  
   :find => findMethod: Specify the find method in your model that is responsible for performing a geolocation-lookup. For example this could be to look at a database and see if this location has already been geocoded.
   
+  
   :save => saveMethod: Which method is responsible for handling a successful geolocation-lookup by another geocoder. This could save the geocoded location to a database for further lookups.
+  
 
 You should provide at least a "find" or "save" method since otherwise the plugin won't do much. But what you do within the save and find method is completly up to. If you make a configuration mistake
 the PluginGeocoder will fail silently and pass the request on to the next defined MultiGeocoder (as the MultiGeocoder always does).
