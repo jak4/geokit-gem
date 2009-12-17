@@ -3,9 +3,9 @@
 In order to develop plugins that aren't necessarly part of the geokit-gem core a plugin interface has been integrated. As far as possible the plugin-engine is non-invasive.
 But of course there are some points that stick out:
 
-  * currently it's main use and therefore it's functionality is to provide a way to hook a plugin into the Multigeocoder-Chain and perform a database lookup before asking google or another geocoder.
+  currently it's main use and therefore it's functionality is to provide a way to hook a plugin into the Multigeocoder-Chain and perform a database lookup before asking google or another geocoder.
   
-  * it has a callback hook in the "normal" Multigeocoder which allows it to call a appropriate plugin which then store a geocoded location or do something else with it.
+  it has a callback hook in the "normal" Multigeocoder which allows it to call a appropriate plugin which then store a geocoded location or do something else with it.
 
 The PluginGeocoder adhers to rules imposed on all other geocoders, thus it will return nil if no object could be "geocoded" or a LatLng Object if "geocoding" was possible. Further more it will
 fail silently (depending on the geokit configuration) if something within the provided plugins does not work.
