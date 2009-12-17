@@ -13,10 +13,13 @@ fail silently (depending on the geokit configuration) if something within the pr
 I have published an accompanying repository (http://github.com/jak4/geokit-plugins) which (should) hold all plugins developed. Currently there is only a crude geocode-cacher available.
 
 To setup the a PluginGeocoder you have todo 2 (3) things:
- *) follow the installation instructions for geokit below. But, be aware that currently there is no gem version for this geokit-gem repository, so you will have to install it as a gem-plugin.
- *) add this to the initializers/geokit_config.rb: 
+
+  follow the installation instructions for geokit below. But, be aware that currently there is no gem version for this geokit-gem repository, so you will have to install it as a gem-plugin.
+ 
+  add this to the initializers/geokit_config.rb: 
     Geokit::Geocoders::plugins = [{:plugin_name => :db, :model => :geokit_cached, :find => :find_location, :save => :save_location}]
- *) modify and enable the multigeocoder configuration like so:
+  
+  modify and enable the multigeocoder configuration like so:
     Geokit::Geocoders::provider_order = [:db,:google]
     
 :model => ModelName: This is your model you have coded some geocoding functionality into. Your model can, for example try to lookup cashed geocoding locations.
