@@ -10,7 +10,7 @@ But of course there are some points that stick out:
 The PluginGeocoder adhers to the rules imposed on all other geocoders, thus it will return nil if no object could be "geocoded" or a LatLng Object if "geocoding" was possible. Further more it will
 fail silently (depending on the geokit configuration) if something within the provided plugins does not work.
 
-I have published an accompanying repository http://github.com/jak4/geokit-plugins which (should) hold all plugins developed. Currently there is only a crude geocode-cacher available.
+I have published an accompanying repository [geokit-plugins](http://github.com/jak4/geokit-plugins) which (should) hold all plugins developed. Currently there is only a crude geocode-cacher available.
 
 To setup the a PluginGeocoder you have todo 2 (3) things:
 
